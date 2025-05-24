@@ -1,0 +1,932 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cp & Cpk Calculator</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+    .hover-scale { transition: transform 0.2s; }
+    .hover-scale:hover { transform: scale(1.05); }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+  <div class="max-w-6xl mx-auto p-4 sm:p-8 animate-fade-in">
+    <div class="bg-white rounded-2xl shadow-md p-6 sm:p-8">
+      <!-- Header -->
+      <div class="flex flex-col sm:flex-row justify-between items-center mb-8">
+        <div>
+          <h1 class="text-4xl font-bold text-gray-800">Calculateur Cp & Cpk</h1>
+          <p class="text-lg text-gray-600 mt-2">EMSI - Ecole Marocaine Des Sciences De L'Ingenieur</p>
+        </div>
+        <select onchange="setLanguage(this.value)" class="p-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 mt-4 sm:mt-0">
+          <option value="fr">Français</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+
+      <!-- Error Message -->
+      <div id="error" class="text-white text-center mb-6 bg-red-500 rounded-lg p-3 hidden animate-pulse"></div>
+
+      <!-- Timer Section -->
+      <div class="mb-8">
+        <h2 class="text-2xl font-semibold text-gray-700 mb-4" id="timerTitle">Timer</h2>
+        <div class="flex justify-center mb-4">
+          <canvas id="timerCanvas" class="border-2 border-indigo-200 rounded-lg shadow-md bg-gradient-to-r from-indigo-50 to-purple-50" width="220" height="60"></canvas>
+        </div>
+        <div class="flex justify-center gap-3">
+          <button onclick="startTimer()" class="bg-indigo-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-indigo-700 hover-scale transition-colors duration-200" id="startButton">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+            </svg>
+            Start
+          </button>
+          <button onclick="stopTimer()" class="bg-gray-500 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-gray-600 hover-scale transition-colors duration-200" id="stopButton">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+            </svg>
+            Stop
+          </button>
+          <button onclick="resetTimer()" class="bg-gray-500 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-gray-600 hover-scale transition-colors duration-200" id="resetButton">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
+            </svg>
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <!-- Modal for Chart Enlargement -->
+      <div id="chartModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 hidden animate-fade-in">
+        <div class="bg-white rounded-2xl p-6 sm:p-8 max-w-5xl w-full mx-4 shadow-xl">
+          <div class="flex justify-between items-center mb-4">
+            <h3 id="modalTitle" class="text-2xl font-bold text-gray-800"></h3>
+            <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div class="h-[500px]">
+            <canvas id="modalChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal for Editing Measurement -->
+      <div id="editModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 hidden animate-fade-in">
+        <div class="bg-white rounded-2xl p-6 sm:p-8 max-w-md w-full mx-4 shadow-xl">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-2xl font-bold text-gray-800">Modifier la mesure</h3>
+            <button onclick="closeEditModal()" class="text-gray-500 hover:text-gray-700">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div class="mb-4">
+            <label for="editMeasureInput" class="block text-sm font-medium text-gray-700 mb-1">Mesure</label>
+            <input id="editMeasureInput" type="number" step="any" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div class="mb-4">
+            <label for="editTimeInput" class="block text-sm font-medium text-gray-700 mb-1">Temps (optionnel, format HH:MM:SS.t)</label>
+            <input id="editTimeInput" type="text" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Ex: 00:00:05.0" />
+          </div>
+          <div class="flex justify-end gap-3">
+            <button onclick="closeEditModal()" class="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 hover-scale transition-colors duration-200">Annuler</button>
+            <button onclick="saveEditedMeasure()" class="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 hover-scale transition-colors duration-200">Enregistrer</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Input Section -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <div>
+          <label for="lsl" class="block text-sm font-medium text-gray-700 mb-1">Limite Inférieure (LSL)</label>
+          <input id="lsl" type="number" step="any" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </div>
+        <div>
+          <label for="usl" class="block text-sm font-medium text-gray-700 mb-1">Limite Supérieure (USL)</label>
+          <input id="usl" type="number" step="any" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </div>
+        <div>
+          <label for="sampleSize" class="block text-sm font-medium text-gray-700 mb-1">Taille d'échantillonnage</label>
+          <div class="flex gap-2">
+            <input id="sampleSize" type="number" min="1" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" value="5" />
+            <button onclick="applySampleSize()" class="bg-indigo-600 text-white px-4 py-3 rounded-lg hover:bg-indigo-700 hover-scale transition-colors duration-200">Appliquer</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Measurements Section -->
+      <div class="mb-8">
+        <h2 class="text-2xl font-semibold text-gray-700 mb-4">Ajouter des mesures</h2>
+        <div class="flex flex-col sm:flex-row gap-3 mb-4">
+          <input id="measureInput" type="number" step="any" class="p-3 border border-gray-300 rounded-lg w-full sm:flex-grow focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Entrez une mesure...">
+          <button onclick="addMeasure()" class="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 hover-scale transition-colors duration-200">Ajouter</button>
+          <button onclick="clearMeasures()" class="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 hover-scale transition-colors duration-200">Effacer</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border border-gray-200 rounded-lg">
+            <thead class="bg-indigo-50">
+              <tr>
+                <th class="p-3 text-sm font-semibold text-gray-700">Échantillon</th>
+                <th class="p-3 text-sm font-semibold text-gray-700">Mesure</th>
+                <th class="p-3 text-sm font-semibold text-gray-700">Temps</th>
+                <th class="p-3 text-sm font-semibold text-gray-700">Action</th>
+              </tr>
+            </thead>
+            <tbody id="measureTable" class="text-gray-600"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex justify-center gap-4 mb-8">
+        <button onclick="calculateCpCpk()" class="bg-green-600 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:bg-green-700 hover-scale transition-colors duration-200">Calculer Cp & Cpk</button>
+        <button onclick="exportData()" class="bg-purple-600 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:bg-purple-700 hover-scale transition-colors duration-200" id="exportButton">Exporter</button>
+      </div>
+
+      <!-- Results Section -->
+      <div>
+        <h2 class="text-2xl font-semibold text-gray-700 mb-4">Résultats</h2>
+        <p id="results" class="mt-2 text-lg text-gray-600"></p>
+        <p id="normalityWarning" class="mt-2 text-yellow-800 bg-yellow-100 rounded-lg p-3 hidden"></p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-6">
+          <div class="h-80">
+            <h3 class="font-semibold text-lg text-gray-700 mb-2">Distribution & Limites de Spécification</h3>
+            <div class="chart-container relative cursor-pointer bg-white rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow" onclick="openModal('distribution')">
+              <canvas id="chart" class="h-full"></canvas>
+            </div>
+          </div>
+          <div class="h-80">
+            <h3 class="font-semibold text-lg text-gray-700 mb-2">Carte de Contrôle (X-bar)</h3>
+            <div class="chart-container relative cursor-pointer bg-white rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow" onclick="openModal('control')">
+              <canvas id="controlChart" class="h-full"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Localization
+    const translations = {
+      fr: {
+        title: "Calculateur Cp & Cpk",
+        lsl: "Limite Inférieure (LSL)",
+        usl: "Limite Supérieure (USL)",
+        sampleSize: "Taille d'échantillonnage",
+        apply: "Appliquer",
+        addMeasure: "Ajouter des mesures",
+        measurePlaceholder: "Entrez une mesure...",
+        calculate: "Calculer Cp & Cpk",
+        export: "Exporter",
+        results: "Résultats",
+        mean: "Moyenne",
+        stdDev: "Écart-type",
+        time: "Temps",
+        edit: "Modifier",
+        normalityWarning: "Attention : Les données peuvent ne pas suivre une distribution normale, ce qui peut affecter la précision de la courbe.",
+        errorLSL: "LSL doit être inférieur à USL.",
+        errorSampleSize: "La taille d'échantillonnage doit être un entier positif.",
+        errorMeasures: "Entrez au moins 2 échantillons valides (nombre de mesures ≥ taille d'échantillonnage × 2).",
+        errorStdDev: "L'écart-type est zéro. Veuillez entrer des mesures variées.",
+        errorInvalidMeasure: "Veuillez entrer une mesure valide.",
+        errorInvalidTime: "Format de temps invalide. Utilisez HH:MM:SS.t (ex: 00:00:05.0).",
+        errorNoResults: "Aucun résultat à exporter. Veuillez calculer Cp & Cpk d'abord.",
+        distribution: "Distribution & Limites de Spécification",
+        controlChart: "Carte de Contrôle (X-bar)",
+        measurement: "Moyenne de l'échantillon",
+        sample: "Échantillon",
+        ucl: "LSC (Limite Supérieure de Contrôle)",
+        lcl: "LIC (Limite Inférieure de Contrôle)",
+        centerLine: "Ligne Centrale",
+        timer: "Chronomètre",
+        start: "Démarrer",
+        stop: "Arrêter",
+        reset: "Réinitialiser"
+      },
+      en: {
+        title: "Cp & Cpk Calculator",
+        lsl: "Lower Specification Limit (LSL)",
+        usl: "Upper Specification Limit (USL)",
+        sampleSize: "Sample Size",
+        apply: "Apply",
+        addMeasure: "Add Measurements",
+        measurePlaceholder: "Enter a measurement...",
+        calculate: "Calculate Cp & Cpk",
+        export: "Export",
+        results: "Results",
+        mean: "Mean",
+        stdDev: "Standard Deviation",
+        time: "Time",
+        edit: "Edit",
+        normalityWarning: "Warning: The data may not follow a normal distribution, which may affect the accuracy of the curve.",
+        errorLSL: "LSL must be less than USL.",
+        errorSampleSize: "Sample size must be a positive integer.",
+        errorMeasures: "Enter at least 2 valid samples (number of measurements ≥ sample size × 2).",
+        errorStdDev: "Standard deviation is zero. Please enter varied measurements.",
+        errorInvalidMeasure: "Please enter a valid measurement.",
+        errorInvalidTime: "Invalid time format. Use HH:MM:SS.t (e.g., 00:00:05.0).",
+        errorNoResults: "No results to export. Please calculate Cp & Cpk first.",
+        distribution: "Distribution & Specification Limits",
+        controlChart: "Control Chart (X-bar)",
+        measurement: "Sample Mean",
+        sample: "Sample",
+        ucl: "UCL (Upper Control Limit)",
+        lcl: "LCL (Lower Control Limit)",
+        centerLine: "Center Line",
+        timer: "Timer",
+        start: "Start",
+        stop: "Stop",
+        reset: "Reset"
+      }
+    };
+
+    let currentLang = 'fr';
+    let measures = [];
+    let timestamps = [];
+    let sampleSize = 5;
+    let chart;
+    let controlChart;
+    let modalChart;
+    let timerInterval = null;
+    let elapsedTime = 0;
+    let isTimerRunning = false;
+    let latestResults = null;
+    let editingIndex = null;
+
+    // Control Chart Constants (A2, D4, D3 for sample size)
+    const controlChartConstants = {
+      2: { A2: 1.880, D4: 3.267, D3: 0 },
+      3: { A2: 1.023, D4: 2.574, D3: 0 },
+      4: { A2: 0.729, D4: 2.282, D3: 0 },
+      5: { A2: 0.577, D4: 2.114, D3: 0 },
+      6: { A2: 0.483, D4: 2.004, D3: 0 },
+      7: { A2: 0.419, D4: 1.924, D3: 0.076 },
+      8: { A2: 0.373, D4: 1.864, D3: 0.136 },
+      9: { A2: 0.337, D4: 1.816, D3: 0.184 },
+      10: { A2: 0.308, D4: 1.777, D3: 0.223 }
+    };
+
+    // Timer Functions
+    function startTimer() {
+      if (!isTimerRunning) {
+        isTimerRunning = true;
+        timerInterval = setInterval(() => {
+          elapsedTime += 100;
+          updateTimerCanvas();
+        }, 100);
+      }
+    }
+
+    function stopTimer() {
+      if (isTimerRunning) {
+        isTimerRunning = false;
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+    }
+
+    function resetTimer() {
+      stopTimer();
+      elapsedTime = 0;
+      updateTimerCanvas();
+    }
+
+    function formatTime(ms) {
+      if (ms === null) return '-';
+      const hours = Math.floor(ms / (1000 * 60 * 60));
+      const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((ms % (1000 * 60)) / 1000);
+      const tenths = Math.floor((ms % 1000) / 100);
+      return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${tenths}`;
+    }
+
+    function parseTimeInput(timeStr) {
+      if (!timeStr) return null;
+      const regex = /^(\d{2}):(\d{2}):(\d{2})\.(\d)$/;
+      const match = timeStr.match(regex);
+      if (!match) return null;
+      const hours = parseInt(match[1]);
+      const minutes = parseInt(match[2]);
+      const seconds = parseInt(match[3]);
+      const tenths = parseInt(match[4]);
+      if (hours >= 24 || minutes >= 60 || seconds >= 60) return null;
+      return (hours * 3600 + minutes * 60 + seconds) * 1000 + tenths * 100;
+    }
+
+    function updateTimerCanvas() {
+      const canvas = document.getElementById('timerCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#1F2937';
+      ctx.font = '28px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(formatTime(elapsedTime), canvas.width / 2, canvas.height / 2);
+    }
+
+    // Edit Measurement Functions
+    function openEditModal(index) {
+      editingIndex = index;
+      document.getElementById('editModal').classList.remove('hidden');
+      document.getElementById('editMeasureInput').value = measures[index];
+      document.getElementById('editTimeInput').value = timestamps[index] ? formatTime(timestamps[index]) : '';
+    }
+
+    function closeEditModal() {
+      document.getElementById('editModal').classList.add('hidden');
+      editingIndex = null;
+      document.getElementById('editMeasureInput').value = '';
+      document.getElementById('editTimeInput').value = '';
+    }
+
+    function saveEditedMeasure() {
+      const newValue = parseFloat(document.getElementById('editMeasureInput').value);
+      const newTime = document.getElementById('editTimeInput').value.trim();
+      if (isNaN(newValue)) {
+        showError(translations[currentLang].errorInvalidMeasure);
+        return;
+      }
+      const parsedTime = parseTimeInput(newTime);
+      if (newTime && parsedTime === null) {
+        showError(translations[currentLang].errorInvalidTime);
+        return;
+      }
+      measures[editingIndex] = newValue;
+      timestamps[editingIndex] = parsedTime;
+      updateTable();
+      if (measures.length >= sampleSize * 2 && latestResults) calculateCpCpk();
+      closeEditModal();
+    }
+
+    // Export Function
+    function exportData() {
+      if (!latestResults) {
+        showError(translations[currentLang].errorNoResults);
+        return;
+      }
+
+      // Export Results as Text
+      const resultsText = `
+${translations[currentLang].results}:
+${translations[currentLang].sampleSize}: ${sampleSize}
+${translations[currentLang].mean}: ${latestResults.mean.toFixed(2)}
+${translations[currentLang].stdDev}: ${latestResults.stdDev.toFixed(2)}
+Cp: ${latestResults.cp.toFixed(2)}
+Cpk: ${latestResults.cpk.toFixed(2)}
+${translations[currentLang].ucl}: ${latestResults.ucl.toFixed(2)}
+${translations[currentLang].lcl}: ${latestResults.lcl.toFixed(2)}
+      `;
+      const resultsBlob = new Blob([resultsText], { type: 'text/plain' });
+      const resultsUrl = URL.createObjectURL(resultsBlob);
+      const resultsLink = document.createElement('a');
+      resultsLink.href = resultsUrl;
+      resultsLink.download = translations[currentLang].results === 'Résultats' ? 'resultats.txt' : 'results.txt';
+      resultsLink.click();
+      URL.revokeObjectURL(resultsUrl);
+
+      // Export Measurements as CSV
+      let csvContent = `${translations[currentLang].sample},${translations[currentLang].measurement},${translations[currentLang].time}\n`;
+      measures.forEach((val, idx) => {
+        const sampleNumber = Math.floor(idx / sampleSize) + 1;
+        const time = formatTime(timestamps[idx]);
+        csvContent += `${sampleNumber},${val},${time}\n`;
+      });
+      const csvBlob = new Blob([csvContent], { type: 'text/csv' });
+      const csvUrl = URL.createObjectURL(csvBlob);
+      const csvLink = document.createElement('a');
+      csvLink.href = csvUrl;
+      csvLink.download = translations[currentLang].results === 'Résultats' ? 'mesures.csv' : 'measurements.csv';
+      csvLink.click();
+      URL.revokeObjectURL(csvUrl);
+
+      // Export Charts as PNG
+      if (chart) {
+        const distChartUrl = chart.toBase64Image();
+        const distLink = document.createElement('a');
+        distLink.href = distChartUrl;
+        distLink.download = translations[currentLang].results === 'Résultats' ? 'distribution.png' : 'distribution.png';
+        distLink.click();
+      }
+
+      if (controlChart) {
+        const controlChartUrl = controlChart.toBase64Image();
+        const controlLink = document.createElement('a');
+        controlLink.href = controlChartUrl;
+        controlLink.download = translations[currentLang].results === 'Résultats' ? 'carte_controle.png' : 'control_chart.png';
+        controlLink.click();
+      }
+    }
+
+    // Modal Functions for Charts
+    function openModal(chartType) {
+      document.getElementById('chartModal').classList.remove('hidden');
+      const modalTitle = document.getElementById('modalTitle');
+      modalTitle.textContent = chartType === 'distribution' ? translations[currentLang].distribution : translations[currentLang].controlChart;
+      if (modalChart) modalChart.destroy();
+      const sourceChart = chartType === 'distribution' ? chart : controlChart;
+      if (!sourceChart) return;
+      const ctx = document.getElementById('modalChart').getContext('2d');
+      modalChart = new Chart(ctx, {
+        type: sourceChart.config.type,
+        data: JSON.parse(JSON.stringify(sourceChart.data)),
+        options: {
+          ...JSON.parse(JSON.stringify(sourceChart.config.options)),
+          responsive: true,
+          maintainAspectRatio: true,
+          aspectRatio: 2,
+          plugins: {
+            ...sourceChart.config.options.plugins,
+            legend: { display: true, position: 'top' }
+          }
+        }
+      });
+    }
+
+    function closeModal() {
+      document.getElementById('chartModal').classList.add('hidden');
+      if (modalChart) {
+        modalChart.destroy();
+        modalChart = null;
+      }
+    }
+
+    window.addEventListener('click', function(event) {
+      const chartModal = document.getElementById('chartModal');
+      const editModal = document.getElementById('editModal');
+      if (event.target === chartModal) closeModal();
+      if (event.target === editModal) closeEditModal();
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.chart-container').forEach(container => {
+        container.innerHTML += `<div class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-0 hover:bg-opacity-10 transition-opacity">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-500 opacity-0 hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>`;
+      });
+
+      if (typeof Chart !== 'undefined' && window['chartjs-plugin-annotation']) {
+        Chart.register(window['chartjs-plugin-annotation']);
+      }
+      updateTimerCanvas();
+      setLanguage('fr');
+    });
+
+    function setLanguage(lang) {
+      currentLang = lang;
+      document.querySelector('h1').textContent = translations[lang].title;
+      document.querySelector('label[for="lsl"]').textContent = translations[lang].lsl;
+      document.querySelector('label[for="usl"]').textContent = translations[lang].usl;
+      document.querySelector('label[for="sampleSize"]').textContent = translations[lang].sampleSize;
+      document.querySelector('button[onclick="applySampleSize()"]').textContent = translations[lang].apply;
+      document.querySelectorAll('h2')[0].textContent = translations[lang].timer;
+      document.querySelectorAll('h2')[1].textContent = translations[lang].addMeasure;
+      document.getElementById('measureInput').placeholder = translations[lang].measurePlaceholder;
+      document.querySelector('button[onclick="calculateCpCpk()"]').textContent = translations[lang].calculate;
+      document.querySelector('#exportButton').textContent = translations[lang].export;
+      document.querySelectorAll('h2')[2].textContent = translations[lang].results;
+      document.getElementById('editModal').querySelector('h3').textContent = translations[lang].results === 'Résultats' ? 'Modifier la mesure' : 'Edit Measurement';
+      document.getElementById('editMeasureInput').previousElementSibling.textContent = translations[lang].results === 'Résultats' ? 'Mesure' : 'Measurement';
+      document.getElementById('editTimeInput').previousElementSibling.textContent = translations[lang].results === 'Résultats' ? 'Temps (optionnel, format HH:MM:SS.t)' : 'Time (optional, format HH:MM:SS.t)';
+      document.getElementById('startButton').innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+        </svg>
+        ${translations[lang].start}
+      `;
+      document.getElementById('stopButton').innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+        </svg>
+        ${translations[lang].stop}
+      `;
+      document.getElementById('resetButton').innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
+        </svg>
+        ${translations[lang].reset}
+      `;
+      document.querySelectorAll('th')[0].textContent = translations[lang].sample;
+      document.querySelectorAll('th')[1].textContent = translations[lang].measurement;
+      document.querySelectorAll('th')[2].textContent = translations[lang].time;
+      document.querySelectorAll('th')[3].textContent = translations[lang].results === 'Résultats' ? 'Action' : 'Action';
+      updateTable();
+      if (measures.length >= sampleSize * 2 && latestResults) calculateCpCpk();
+    }
+
+    function showError(message) {
+      const errorDiv = document.getElementById('error');
+      errorDiv.textContent = message;
+      errorDiv.classList.remove('hidden');
+      setTimeout(() => errorDiv.classList.add('hidden'), 3000);
+    }
+
+    function applySampleSize() {
+      const newSampleSize = parseInt(document.getElementById('sampleSize').value);
+      if (isNaN(newSampleSize) || newSampleSize < 1) {
+        showError(translations[currentLang].errorSampleSize);
+        return;
+      }
+      sampleSize = newSampleSize;
+      updateTable();
+      if (measures.length >= sampleSize * 2 && latestResults) calculateCpCpk();
+    }
+
+    function addMeasure() {
+      const input = document.getElementById('measureInput');
+      const value = parseFloat(input.value);
+      if (isNaN(value)) {
+        showError(translations[currentLang].errorInvalidMeasure);
+        return;
+      }
+      measures.push(value);
+      timestamps.push(isTimerRunning ? elapsedTime : null);
+      updateTable();
+      input.value = '';
+    }
+
+    function updateTable() {
+      const table = document.getElementById('measureTable');
+      table.innerHTML = '';
+      measures.forEach((val, idx) => {
+        const sampleNumber = Math.floor(idx / sampleSize) + 1;
+        const time = formatTime(timestamps[idx]);
+        const row = `<tr class="odd:bg-gray-50 hover:bg-gray-100">
+          <td class='p-3 border-r border-gray-200'>${sampleNumber}</td>
+          <td class='p-3 border-r border-gray-200'>${val}</td>
+          <td class='p-3 border-r border-gray-200'>${time}</td>
+          <td class='p-3'>
+            <button onclick="openEditModal(${idx})" class="bg-yellow-500 text-white px-2 py-1 rounded-lg hover:bg-yellow-600 flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.379-8.379-2.828-2.828z" />
+              </svg>
+              ${translations[currentLang].edit}
+            </button>
+          </td>
+        </tr>`;
+        table.innerHTML += row;
+      });
+    }
+
+    function clearMeasures() {
+      measures = [];
+      timestamps = [];
+      latestResults = null;
+      updateTable();
+      document.getElementById('results').innerHTML = '';
+      document.getElementById('normalityWarning').classList.add('hidden');
+      if (chart) chart.destroy();
+      if (controlChart) controlChart.destroy();
+    }
+
+    function calculateCpCpk() {
+      const lsl = parseFloat(document.getElementById('lsl').value);
+      const usl = parseFloat(document.getElementById('usl').value);
+      if (isNaN(lsl) || isNaN(usl) || lsl >= usl) {
+        showError(translations[currentLang].errorLSL);
+        return;
+      }
+      if (isNaN(sampleSize) || sampleSize < 1) {
+        showError(translations[currentLang].errorSampleSize);
+        return;
+      }
+      if (measures.length < sampleSize * 2) {
+        showError(translations[currentLang].errorMeasures);
+        return;
+      }
+
+      // Cp and Cpk calculations
+      const mean = measures.reduce((a, b) => a + b, 0) / measures.length;
+      const stdDev = Math.sqrt(measures.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (measures.length - 1));
+      if (stdDev === 0) {
+        showError(translations[currentLang].errorStdDev);
+        return;
+      }
+      const cp = (usl - lsl) / (6 * stdDev);
+      const cpu = (usl - mean) / (3 * stdDev);
+      const cpl = (mean - lsl) / (3 * stdDev);
+      const cpk = Math.min(cpu, cpl);
+
+      // Control chart calculations (X-bar and R-chart)
+      const subgroups = [];
+      for (let i = 0; i < measures.length; i += sampleSize) {
+        const subgroup = measures.slice(i, i + sampleSize);
+        if (subgroup.length === sampleSize) {
+          const subMean = subgroup.reduce((a, b) => a + b, 0) / sampleSize;
+          const range = Math.max(...subgroup) - Math.min(...subgroup);
+          subgroups.push({ mean: subMean, range });
+        }
+      }
+      if (subgroups.length < 2) {
+        showError(translations[currentLang].errorMeasures);
+        return;
+      }
+      const xBar = subgroups.reduce((a, b) => a + b.mean, 0) / subgroups.length;
+      const rBar = subgroups.reduce((a, b) => a + b.range, 0) / subgroups.length;
+      const constants = controlChartConstants[sampleSize] || controlChartConstants[5];
+      const ucl = xBar + constants.A2 * rBar;
+      const lcl = xBar - constants.A2 * rBar;
+
+      latestResults = { mean, stdDev, cp, cpk, ucl, lcl, lsl, usl, xBar, rBar };
+
+      document.getElementById("results").innerHTML = `
+        ${translations[currentLang].mean}: <strong class="text-gray-800">${mean.toFixed(2)}</strong><br>
+        ${translations[currentLang].stdDev}: <strong class="text-gray-800">${stdDev.toFixed(2)}</strong><br>
+        Cp: <strong class="text-gray-800">${cp.toFixed(2)}</strong><br>
+        Cpk: <strong class="text-gray-800">${cpk.toFixed(2)}</strong><br>
+        ${translations[currentLang].ucl}: <strong class="text-gray-800">${ucl.toFixed(2)}</strong><br>
+        ${translations[currentLang].lcl}: <strong class="text-gray-800">${lcl.toFixed(2)}</strong>
+      `;
+
+      // Check for non-normality (simple skewness heuristic)
+      const skewness = measures.reduce((sum, x) => sum + Math.pow((x - mean) / stdDev, 3), 0) / measures.length;
+      if (Math.abs(skewness) > 0.5 && measures.length > 10) {
+        document.getElementById('normalityWarning').textContent = translations[currentLang].normalityWarning;
+        document.getElementById('normalityWarning').classList.remove('hidden');
+      } else {
+        document.getElementById('normalityWarning').classList.add('hidden');
+      }
+
+      drawChart(mean, stdDev, lsl, usl);
+      drawControlChart(xBar, rBar, lsl, usl, subgroups);
+    }
+
+    function gaussian(x, mean, stdDev) {
+      return (1 / (stdDev * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * Math.pow((x - mean) / stdDev, 2));
+    }
+
+    function drawChart(mean, stdDev, lsl, usl) {
+      if (typeof Chart === 'undefined') {
+        showError('Erreur de chargement du graphique. Veuillez recharger la page.');
+        return;
+      }
+      if (chart) chart.destroy();
+
+      const range = 3.5;
+      const min = Math.min(mean - range * stdDev, lsl - stdDev);
+      const max = Math.max(mean + range * stdDev, usl + stdDev);
+      const step = (max - min) / 100;
+
+      // Generate normal distribution data
+      const normalData = [];
+      let maxDensity = 0;
+      for (let x = min; x <= max; x += step) {
+        const density = gaussian(x, mean, stdDev);
+        normalData.push({ x, y: density });
+        maxDensity = Math.max(maxDensity, density);
+      }
+
+      // Use Scott's rule for bin width: h = 3.5 * stdDev / (n^(1/3))
+      const n = measures.length;
+      const binWidth = 3.5 * stdDev / Math.pow(n, 1/3);
+      const binCount = Math.ceil((max - min) / binWidth);
+      const bins = Array(binCount).fill(0);
+      measures.forEach(measurement => {
+        const binIndex = Math.min(Math.floor((measurement - min) / binWidth), binCount - 1);
+        if (binIndex >= 0) bins[binIndex]++;
+      });
+
+      // Normalize histogram so the total area approximates 1
+      const totalArea = bins.reduce((sum, count) => sum + count * binWidth, 0);
+      const histogramData = [];
+      let maxHistDensity = 0;
+      for (let i = 0; i < binCount; i++) {
+        const binCenter = min + (i + 0.5) * binWidth;
+        const density = bins[i] / totalArea;
+        histogramData.push({ x: binCenter, y: density });
+        maxHistDensity = Math.max(maxHistDensity, density);
+      }
+
+      // Scale normal distribution to match histogram height
+      const scaleFactor = maxHistDensity / maxDensity;
+      normalData.forEach(point => point.y *= scaleFactor);
+
+      const ctx = document.getElementById('chart');
+      chart = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+          datasets: [
+            {
+              type: 'bar',
+              label: translations[currentLang].results === 'Résultats' ? 'Histogramme' : 'Histogram',
+              data: histogramData,
+              backgroundColor: 'rgba(79, 70, 229, 0.4)',
+              borderColor: 'rgba(79, 70, 229, 1)',
+              borderWidth: 1,
+              barPercentage: 1,
+              categoryPercentage: 1
+            },
+            {
+              type: 'line',
+              label: translations[currentLang].results === 'Résultats' ? 'Distribution Normale' : 'Normal Distribution',
+              data: normalData,
+              borderColor: 'rgba(124, 58, 237, 1)',
+              borderWidth: 2,
+              fill: false,
+              tension: 0.4,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          aspectRatio: 1.8,
+          scales: {
+            x: { type: 'linear', title: { display: true, text: translations[currentLang].measurement, font: { size: 14 } } },
+            y: { beginAtZero: true, title: { display: true, text: translations[currentLang].results === 'Résultats' ? 'Densité' : 'Density', font: { size: 14 } } }
+          },
+          plugins: {
+            legend: { display: true, position: 'top', labels: { font: { size: 12 } } },
+            annotation: {
+              annotations: {
+                lslLine: { type: 'line', borderColor: 'rgba(239, 68, 68, 1)', borderWidth: 2, scaleID: 'x', value: lsl, label: { display: true, content: 'LSL', position: 'start', backgroundColor: 'rgba(239, 68, 68, 0.8)', font: { size: 12 } } },
+                uslLine: { type: 'line', borderColor: 'rgba(239, 68, 68, 1)', borderWidth: 2, scaleID: 'x', value: usl, label: { display: true, content: 'USL', position: 'start', backgroundColor: 'rgba(239, 68, 68, 0.8)', font: { size: 12 } } },
+                meanLine: { type: 'line', borderColor: 'rgba(16, 185, 129, 1)', borderWidth: 2, scaleID: 'x', value: mean, label: { display: true, content: 'μ', position: 'start', backgroundColor: 'rgba(16, 185, 129, 0.8)', font: { size: 12 } } }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function drawControlChart(xBar, rBar, lsl, usl, subgroups) {
+      if (typeof Chart === 'undefined') {
+        showError('Erreur de chargement du graphique de contrôle.');
+        return;
+      }
+      if (controlChart) controlChart.destroy();
+
+      const constants = controlChartConstants[sampleSize] || controlChartConstants[5];
+      const ucl = xBar + constants.A2 * rBar;
+      const lcl = xBar - constants.A2 * rBar;
+
+      const labels = Array.from({ length: subgroups.length }, (_, i) => i + 1);
+      const data = subgroups.map(s => s.mean);
+      const uclLine = Array(subgroups.length).fill(ucl);
+      const lclLine = Array(subgroups.length).fill(lcl);
+      const meanLine = Array(subgroups.length).fill(xBar);
+      const lslLine = Array(subgroups.length).fill(lsl);
+      const uslLine = Array(subgroups.length).fill(usl);
+
+      const ctx = document.getElementById('controlChart');
+      controlChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: translations[currentLang].measurement,
+              data,
+              borderColor: 'rgba(79, 70, 229, 1)',
+              backgroundColor: 'rgba(79, 70, 229, 0.2)',
+              borderWidth: 2,
+              pointRadius: 4,
+              pointHoverRadius: 6,
+              fill: false
+            },
+            {
+              label: translations[currentLang].ucl,
+              data: uclLine,
+              borderColor: 'rgba(239, 68, 68, 1)',
+              borderWidth: 2,
+              borderDash: [5, 5],
+              pointRadius: 0,
+              fill: false
+            },
+            {
+              label: translations[currentLang].lcl,
+              data: lclLine,
+              borderColor: 'rgba(239, 68, 68, 1)',
+              borderWidth: 2,
+              borderDash: [5, 5],
+              pointRadius: 0,
+              fill: false
+            },
+            {
+              label: translations[currentLang].centerLine,
+              data: meanLine,
+              borderColor: 'rgba(16, 185, 129, 1)',
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: false
+            },
+            {
+              label: 'LSL',
+              data: lslLine,
+              borderColor: 'rgba(239, 68, 68, 1)',
+              borderWidth: 2,
+              borderDash: [10, 5],
+              pointRadius: 0,
+              fill: false
+            },
+            {
+              label: 'USL',
+              data: uslLine,
+              borderColor: 'rgba(239, 68, 68, 1)',
+              borderWidth: 2,
+              borderDash: [10, 5],
+              pointRadius: 0,
+              fill: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          aspectRatio: 1.8,
+          scales: {
+            x: { title: { display: true, text: translations[currentLang].sample, font: { size: 14 } } },
+            y: { title: { display: true, text: translations[currentLang].measurement, font: { size: 14 } } }
+          },
+          plugins: {
+            legend: { display: true, position: 'bottom', labels: { font: { size: 12 } } },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const label = context.dataset.label || '';
+                  const value = context.parsed.y;
+                  return label + ': ' + value.toFixed(2);
+                }
+              }
+            }
+          }
+        }
+      });
+
+      highlightOutOfControlPoints(ucl, lcl, subgroups);
+    }
+
+    function highlightOutOfControlPoints(ucl, lcl, subgroups) {
+      if (!controlChart || !controlChart.data || !controlChart.data.datasets || controlChart.data.datasets.length === 0) return;
+
+      const pointColors = [];
+      const pointBorderColors = [];
+      subgroups.forEach(subgroup => {
+        if (subgroup.mean > ucl || subgroup.mean < lcl) {
+          pointColors.push('rgba(239, 68, 68, 0.5)');
+          pointBorderColors.push('rgba(239, 68, 68, 1)');
+        } else {
+          pointColors.push('rgba(79, 70, 229, 0.2)');
+          pointBorderColors.push('rgba(79, 70, 229, 1)');
+        }
+      });
+
+      controlChart.data.datasets[0].pointBackgroundColor = pointColors;
+      controlChart.data.datasets[0].pointBorderColor = pointBorderColors;
+      controlChart.update();
+    }
+  </script>
+</body>
+</html>
