@@ -45,6 +45,7 @@
   <title>Cp & Cpk Calculator</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @keyframes fadeIn {
@@ -170,6 +171,13 @@
         <div class="flex flex-col sm:flex-row gap-3 mb-4">
           <input id="measureInput" type="number" step="any" class="p-3 border border-gray-300 rounded-lg w-full sm:flex-grow focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Entrez une mesure...">
           <button onclick="addMeasure()" class="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 hover-scale transition-colors duration-200">Ajouter</button>
+          <label class="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 hover-scale transition-colors duration-200 cursor-pointer flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+            </svg>
+            <span id="importButtonText">Importer</span>
+            <input type="file" id="fileInput" accept=".xlsx,.xls" class="hidden" onchange="importFromExcel(event)">
+          </label>
           <button onclick="clearMeasures()" class="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 hover-scale transition-colors duration-200">Effacer</button>
         </div>
         <div class="overflow-x-auto">
@@ -229,6 +237,7 @@
         measurePlaceholder: "Entrez une mesure...",
         calculate: "Calculer Cp & Cpk",
         export: "Exporter",
+        import: "Importer",
         results: "Résultats",
         mean: "Moyenne",
         stdDev: "Écart-type",
@@ -242,6 +251,9 @@
         errorInvalidMeasure: "Veuillez entrer une mesure valide.",
         errorInvalidTime: "Format de temps invalide. Utilisez HH:MM:SS.t (ex: 00:00:05.0).",
         errorNoResults: "Aucun résultat à exporter. Veuillez calculer Cp & Cpk d'abord.",
+        errorInvalidFile: "Veuillez sélectionner un fichier Excel valide (.xlsx ou .xls).",
+        errorEmptySheet: "La feuille Excel est vide ou n'a pas de données valides.",
+        errorInvalidExcelData: "Les données Excel contiennent des mesures non numériques ou des temps invalides.",
         distribution: "Distribution & Limites de Spécification",
         controlChart: "Carte de Contrôle (X-bar)",
         measurement: "Moyenne de l'échantillon",
@@ -264,6 +276,7 @@
         measurePlaceholder: "Enter a measurement...",
         calculate: "Calculate Cp & Cpk",
         export: "Export",
+        import: "Import",
         results: "Results",
         mean: "Mean",
         stdDev: "Standard Deviation",
@@ -277,6 +290,9 @@
         errorInvalidMeasure: "Please enter a valid measurement.",
         errorInvalidTime: "Invalid time format. Use HH:MM:SS.t (e.g., 00:00:05.0).",
         errorNoResults: "No results to export. Please calculate Cp & Cpk first.",
+        errorInvalidFile: "Please select a valid Excel file (.xlsx or .xls).",
+        errorEmptySheet: "The Excel sheet is empty or has no valid data.",
+        errorInvalidExcelData: "Excel data contains non-numeric measurements or invalid times.",
         distribution: "Distribution & Specification Limits",
         controlChart: "Control Chart (X-bar)",
         measurement: "Sample Mean",
@@ -373,6 +389,69 @@
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(formatTime(elapsedTime), canvas.width / 2, canvas.height / 2);
+    }
+
+    // Excel Import Function
+    function importFromExcel(event) {
+      const file = event.target.files[0];
+      if (!file || !file.name.match(/\.(xlsx|xls)$/)) {
+        showError(translations[currentLang].errorInvalidFile);
+        document.getElementById('fileInput').value = '';
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null });
+
+          if (jsonData.length <= 1) {
+            showError(translations[currentLang].errorEmptySheet);
+            document.getElementById('fileInput').value = '';
+            return;
+          }
+
+          // Skip header row
+          const rows = jsonData.slice(1);
+          let hasInvalidData = false;
+
+          rows.forEach((row, index) => {
+            const measurement = parseFloat(row[0]);
+            if (isNaN(measurement)) {
+              hasInvalidData = true;
+              return;
+            }
+            let timestamp = null;
+            if (row[1]) {
+              const timeStr = String(row[1]).trim();
+              timestamp = parseTimeInput(timeStr);
+              if (timeStr && timestamp === null) {
+                hasInvalidData = true;
+                return;
+              }
+            }
+            measures.push(measurement);
+            timestamps.push(timestamp);
+          });
+
+          if (hasInvalidData) {
+            showError(translations[currentLang].errorInvalidExcelData);
+            measures = [];
+            timestamps = [];
+          }
+
+          updateTable();
+          if (measures.length >= sampleSize * 2 && latestResults) calculateCpCpk();
+        } catch (err) {
+          showError(translations[currentLang].errorInvalidFile);
+        }
+        document.getElementById('fileInput').value = '';
+      };
+      reader.readAsArrayBuffer(file);
     }
 
     // Edit Measurement Functions
@@ -536,6 +615,7 @@ ${translations[currentLang].lcl}: ${latestResults.lcl.toFixed(2)}
       document.getElementById('measureInput').placeholder = translations[lang].measurePlaceholder;
       document.querySelector('button[onclick="calculateCpCpk()"]').textContent = translations[lang].calculate;
       document.querySelector('#exportButton').textContent = translations[lang].export;
+      document.querySelector('#importButtonText').textContent = translations[lang].import;
       document.querySelectorAll('h2')[2].textContent = translations[lang].results;
       document.getElementById('editModal').querySelector('h3').textContent = translations[lang].results === 'Résultats' ? 'Modifier la mesure' : 'Edit Measurement';
       document.getElementById('editMeasureInput').previousElementSibling.textContent = translations[lang].results === 'Résultats' ? 'Mesure' : 'Measurement';
